@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/app_state.dart';
 import '../data/seed_data.dart';
 import '../db/app_database.dart';
+import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_text_field.dart';
 import '../widgets/auth_scaffold.dart';
@@ -10,7 +11,7 @@ import '../widgets/primary_button.dart';
 import 'main_shell.dart';
 import 'register_screen.dart';
 
-/// Screen 2 - Login (checks the users table in SQLite)
+/// Screen 2 - Login (Node.js API with SQLite fallback)
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -32,20 +33,54 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _login() async {
-    if (_email.text.trim().isEmpty || _password.text.isEmpty) {
+    final email = _email.text.trim();
+    final password = _password.text;
+    if (email.isEmpty || password.isEmpty) {
       _toast('Please enter your email and password');
       return;
     }
     setState(() => _busy = true);
-    final user =
-        await AppDatabase.instance.login(_email.text, _password.text);
+
+    // 1. Try Node.js backend authentication first
+    final apiResp = await ApiService.instance.login(email: email, password: password);
     if (!mounted) return;
-    if (user == null) {
-      setState(() => _busy = false);
-      _toast('Wrong email or password');
+
+    if (apiResp.success && apiResp.user != null) {
+      final userName = apiResp.user!['name'] as String? ?? email.split('@').first;
+      final userEmail = apiResp.user!['email'] as String? ?? email;
+
+      if (apiResp.accessToken != null) {
+        await AppDatabase.instance.setSetting('access_token', apiResp.accessToken!);
+      }
+      if (apiResp.refreshToken != null) {
+        await AppDatabase.instance.setSetting('refresh_token', apiResp.refreshToken!);
+      }
+
+      await AppDatabase.instance.upsertBackendUser(email: userEmail, name: userName);
+      await AppState.startSession(userEmail);
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const MainShell()), (r) => false);
       return;
     }
-    await AppState.startSession(user.email);
+
+    // 2. If backend responded with an auth error (e.g., bad credentials or account locked)
+    if (!apiResp.message.contains('Could not connect')) {
+      setState(() => _busy = false);
+      _toast(apiResp.message);
+      return;
+    }
+
+    // 3. Server offline -> Fall back to local SQLite login
+    final localUser = await AppDatabase.instance.login(email, password);
+    if (!mounted) return;
+    if (localUser == null) {
+      setState(() => _busy = false);
+      _toast('Wrong email or password (and Node.js server is offline)');
+      return;
+    }
+
+    await AppState.startSession(localUser.email);
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const MainShell()), (r) => false);

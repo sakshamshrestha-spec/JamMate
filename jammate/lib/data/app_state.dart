@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../db/app_database.dart';
 import '../models/models.dart';
 import '../screens/chat_screen.dart';
+import '../services/api_service.dart';
 
 /// Keeps the data from SQLite in memory so screens can read it quickly.
 /// Every change is written to SQLite first (see the methods below).
@@ -51,7 +52,11 @@ class AppState {
   }
 
   static Future<void> logout() async {
+    final refreshToken = await _db.getSetting('refresh_token');
+    await ApiService.instance.logout(refreshToken);
     await _db.clearSetting('session');
+    await _db.clearSetting('access_token');
+    await _db.clearSetting('refresh_token');
     profile.value = null;
     myCovers.value = [];
     tab.value = 0;

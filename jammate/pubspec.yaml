@@ -11,6 +11,7 @@ dependencies:
     sdk: flutter
   sqflite: ^2.3.3+1   # SQLite database
   crypto: ^3.0.3      # password hashing (SHA-256)
+  http: ^1.2.1        # REST API calls for Node.js backend
 
 dev_dependencies:
   flutter_test:

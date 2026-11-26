@@ -132,7 +132,39 @@ class AppDatabase {
       'instrument': instrument,
       'skill': skill,
       'city': 'Kathmandu',
-    });
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// Ensures user exists or updates them in SQLite when coming from backend response
+  Future<void> upsertBackendUser({
+    required String email,
+    required String name,
+    String? instrument,
+    String? skill,
+  }) async {
+    final formattedEmail = email.trim().toLowerCase();
+    final existing = await getUser(formattedEmail);
+    if (existing == null) {
+      await _db.insert('users', {
+        'email': formattedEmail,
+        'password_hash': '',
+        'name': name.trim(),
+        'instrument': instrument ?? 'Guitar',
+        'skill': skill ?? 'Intermediate',
+        'city': 'Kathmandu',
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    } else {
+      await _db.update(
+        'users',
+        {
+          'name': name.trim(),
+          if (instrument != null) 'instrument': instrument,
+          if (skill != null) 'skill': skill,
+        },
+        where: 'email = ?',
+        whereArgs: [formattedEmail],
+      );
+    }
   }
 
   /// Returns the user if the email + password are correct, otherwise null.

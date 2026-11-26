@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/app_state.dart';
 import '../db/app_database.dart';
+import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_text_field.dart';
 import '../widgets/auth_scaffold.dart';
@@ -10,7 +11,7 @@ import '../widgets/primary_button.dart';
 import 'login_screen.dart';
 import 'main_shell.dart';
 
-/// Create account - saves the new user in SQLite.
+/// Create account - registers with Node.js backend with SQLite fallback.
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
 
@@ -55,10 +56,48 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
     setState(() => _busy = true);
+
+    // 1. Try Node.js backend registration first
+    final apiResp = await ApiService.instance.register(
+      name: _name.text,
+      email: email,
+      password: _password.text,
+    );
+    if (!mounted) return;
+
+    if (apiResp.success && apiResp.user != null) {
+      if (apiResp.accessToken != null) {
+        await AppDatabase.instance.setSetting('access_token', apiResp.accessToken!);
+      }
+      if (apiResp.refreshToken != null) {
+        await AppDatabase.instance.setSetting('refresh_token', apiResp.refreshToken!);
+      }
+
+      await AppDatabase.instance.upsertBackendUser(
+        email: email,
+        name: _name.text,
+        instrument: _instrument,
+        skill: _skill,
+      );
+      await AppState.startSession(email.toLowerCase());
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const MainShell()), (r) => false);
+      return;
+    }
+
+    // 2. If backend responded with a validation/conflict error
+    if (!apiResp.message.contains('Could not connect')) {
+      setState(() => _busy = false);
+      _toast(apiResp.message);
+      return;
+    }
+
+    // 3. Server offline -> Fall back to local SQLite registration
     if (await AppDatabase.instance.emailExists(email)) {
       if (!mounted) return;
       setState(() => _busy = false);
-      _toast('This email is already registered');
+      _toast('This email is already registered locally');
       return;
     }
     await AppDatabase.instance.registerUser(
